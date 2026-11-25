@@ -91,9 +91,6 @@ final class NotchViewModel: ObservableObject {
         if hovering {
             isPeeking = false
             peekTask?.cancel()
-            if IsletSettings.hapticFeedback {
-                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-            }
         } else if !isPlaying {
             // Show the paused track again after the user looked at it, then tuck away.
             scheduleDormant()
@@ -212,6 +209,7 @@ final class NotchPanel: NSPanel {
         isFloatingPanel = true
         hidesOnDeactivate = false
         ignoresMouseEvents = true
+        acceptsMouseMovedEvents = true // so the local monitor sees moves over the island
         level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3) // above the menu bar
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
     }
@@ -279,8 +277,30 @@ final class NotchWindowController {
         }) { monitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
             self?.trackMouse()
+            self?.performPendingHaptic() // the touch is now routed to our panel
             return event
         }) { monitors.append(local) }
+    }
+
+    // MARK: Haptics (#2)
+
+    private var hapticPending = false
+
+    /// The trackpad plays haptics for the window that owns the current touch. When the hover starts, that's
+    /// still the app under the panel (the panel was click-through), so wait until our panel gets the
+    /// events: the next local mouse event, or a short fallback delay.
+    private func requestHaptic() {
+        guard IsletSettings.hapticFeedback else { return }
+        hapticPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            MainActor.assumeIsolated { self?.performPendingHaptic() }
+        }
+    }
+
+    private func performPendingHaptic() {
+        guard hapticPending else { return }
+        hapticPending = false
+        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
     }
 
     private func trackMouse() {
@@ -291,6 +311,7 @@ final class NotchWindowController {
         if inside {
             exitWork?.cancel()
             exitWork = nil
+            if !model.isHovering { requestHaptic() }
             model.setHovering(true)
         } else if model.isHovering, exitWork == nil {
             let work = DispatchWorkItem { [weak self] in

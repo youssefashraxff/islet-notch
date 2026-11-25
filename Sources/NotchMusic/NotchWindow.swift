@@ -8,9 +8,21 @@ struct NotchGeometry: Equatable {
     var notchSize: CGSize
     var hasNotch: Bool
 
-    /// Prefer the built-in display with a notch; fall back to the main screen.
+    /// The display picked in the ♪ menu if it's connected; otherwise the built-in display with a notch,
+    /// then the main screen.
     static func preferredScreen() -> NSScreen {
-        NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main ?? NSScreen.screens[0]
+        let screens = NSScreen.screens
+        if let id = IsletSettings.preferredDisplayID, let match = screens.first(where: { $0.displayID == id }) {
+            return match
+        }
+        if let name = IsletSettings.preferredDisplayName, let match = screens.first(where: { $0.localizedName == name }) {
+            return match
+        }
+        return automaticScreen()
+    }
+
+    static func automaticScreen() -> NSScreen {
+        NSScreen.screens.first { $0.hasNotch } ?? NSScreen.main ?? NSScreen.screens[0]
     }
 
     static func of(_ screen: NSScreen) -> NotchGeometry {
@@ -43,7 +55,11 @@ final class NotchViewModel: ObservableObject {
     private(set) var isHovering = false
     private var isPeeking = false
     @Published private(set) var hasMedia = false
+    private var isPlaying = false
+    /// Paused long enough that the island has tucked itself back into the notch.
+    private var isDormant = false
     private var peekTask: Task<Void, Never>?
+    private var dormantTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
     init(nowPlaying: NowPlayingService, geometry: NotchGeometry) {
@@ -58,6 +74,12 @@ final class NotchViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        nowPlaying.$info
+            .map { $0?.isPlaying ?? false }
+            .removeDuplicates()
+            .sink { [weak self] playing in self?.playbackChanged(playing) }
+            .store(in: &cancellables)
+
         nowPlaying.trackChanged
             .sink { [weak self] in self?.peek() }
             .store(in: &cancellables)
@@ -66,7 +88,48 @@ final class NotchViewModel: ObservableObject {
     func setHovering(_ hovering: Bool) {
         guard hovering != isHovering else { return }
         isHovering = hovering
-        if hovering { isPeeking = false; peekTask?.cancel() }
+        if hovering {
+            isPeeking = false
+            peekTask?.cancel()
+            if IsletSettings.hapticFeedback {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            }
+        } else if !isPlaying {
+            // Show the paused track again after the user looked at it, then tuck away.
+            scheduleDormant()
+        }
+        recompute()
+    }
+
+    // MARK: Collapse after pause (Dynamic Island behaviour)
+
+    private func playbackChanged(_ playing: Bool) {
+        isPlaying = playing
+        if playing {
+            dormantTask?.cancel()
+            isDormant = false
+        } else {
+            scheduleDormant()
+        }
+        recompute()
+    }
+
+    private func scheduleDormant() {
+        dormantTask?.cancel()
+        isDormant = false
+        guard IsletSettings.collapseWhenPaused else { return }
+        dormantTask = Task { [weak self] in
+            try? await Task.sleep(for: IsletSettings.collapseDelay)
+            guard !Task.isCancelled, let self, !self.isPlaying else { return }
+            self.isDormant = true
+            self.recompute()
+        }
+    }
+
+    /// Called when the ♪ menu toggle changes.
+    func collapseSettingChanged() {
+        if isPlaying { return }
+        if IsletSettings.collapseWhenPaused { scheduleDormant() } else { dormantTask?.cancel(); isDormant = false }
         recompute()
     }
 
@@ -87,7 +150,7 @@ final class NotchViewModel: ObservableObject {
         let next: NotchState
         if isHovering { next = .expanded }
         else if isPeeking && hasMedia { next = .peek }
-        else if hasMedia { next = .compact }
+        else if hasMedia && !isDormant { next = .compact }
         else { next = .idle }
         if next != state { state = next }
     }
@@ -192,6 +255,10 @@ final class NotchWindowController {
         reposition()
         panel.orderFrontRegardless()
         installMouseMonitors()
+    }
+
+    func collapseSettingChanged() {
+        model.collapseSettingChanged()
     }
 
     func reposition() {

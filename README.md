@@ -33,7 +33,20 @@ mv build/Islet.app /Applications/ && open /Applications/Islet.app
 
 For development, `swift run` (or open `Package.swift` in Xcode). On macOS 27+ without full Xcode, prefix with `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk` (Command Line Tools 27+ omits the `SwiftUIMacros` plugin; `bundle.sh` applies this fallback automatically).
 
-Islet lives in the menu bar (♪): turn on **Launch at Login**, toggle **High-Resolution Posters**, or quit from there.
+Prebuilt, ad-hoc signed builds are attached to each [release](https://github.com/youssefashraxff/islet-notch/releases). They aren't notarized, so after unzipping run `xattr -dr com.apple.quarantine Islet.app` (or right-click → Open) the first time.
+
+Islet lives in the menu bar (♪):
+
+- **Launch at Login**
+- **High-Resolution Posters**: full-size covers from Apple's catalog (see below)
+- **Haptic Feedback**: a light trackpad tap when the island expands on hover
+- **Collapse When Paused**: tucks the island back into the notch 5 s after playback pauses, like the iPhone. It comes back on play, on a track change, or when you hover the notch
+- **Display**: pick which display shows the island. **Automatic** uses the built-in notched display, otherwise the main one
+- **Media Sources**: **Prefer Music Apps** keeps a playing music app (Apple Music, Spotify, Anghami, Deezer, TIDAL, Podcasts…) on the island when a browser tab or video also starts playing. Under **Ignore**, tick apps that should never take over the island
+
+### Multiple media sources
+
+macOS only reports one Now Playing app at a time: whichever started playing last. When a browser takes over from a music app that's still playing, Islet keeps showing the music app's last track until that track would have ended, the app quits, or the app reports again. While it's held, the controls drive Apple Music and Spotify directly with AppleScript (macOS asks once for permission); for other music apps they bring the app to the front.
 
 ## How Now Playing works
 
@@ -47,10 +60,11 @@ Browsers only give macOS a ~120 px poster, so for music (tracks with a title, ar
 
 The Swift package and executable keep the code name `NotchMusic`; the app is named Islet.
 
-- `NotchMusicApp.swift`: entry point, accessory app, menu-bar item, Launch at Login
-- `NowPlayingService.swift`: adapter process, JSON parsing, media controls
+- `NotchMusicApp.swift`: entry point, accessory app, menu-bar item and submenus, Launch at Login
+- `Settings.swift`: menu preferences stored in UserDefaults
+- `NowPlayingService.swift`: adapter process, JSON parsing, source priority and ignored apps, media controls
 - `ArtworkPalette.swift`: major colour of the artwork and the matching text colour
-- `NotchWindow.swift`: notch geometry, state machine, click-through overlay panel, hover tracking
+- `NotchWindow.swift`: display choice, notch geometry, state machine (incl. collapse after pause), click-through overlay panel, hover tracking and haptics
 - `ArtworkUpscaler.swift`: full-resolution covers from Apple's catalog
 - `PointerCursor.swift`: pointing-hand cursor over buttons (private API, since the app is never active)
 - `NotchViews.swift`: SwiftUI: notch shape, compact / peek / expanded views, equaliser, scrubber

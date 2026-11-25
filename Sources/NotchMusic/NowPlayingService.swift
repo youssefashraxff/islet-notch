@@ -27,6 +27,45 @@ struct NowPlayingInfo: Equatable {
     }
 }
 
+/// One Now Playing report from a single app.
+struct SourceSnapshot {
+    var info: NowPlayingInfo
+    var artworkData: Data?
+    var isMusicApp: Bool
+
+    var bundleID: String { info.appBundleID }
+
+    /// Whether the track should still be going, judging by the last report (we stop hearing from an app
+    /// once another one becomes the system's Now Playing source).
+    func trackStillRunning(at date: Date = Date()) -> Bool {
+        guard info.duration > 0 else { return true }
+        let rate = info.playbackRate > 0 ? info.playbackRate : 1
+        return info.elapsed + date.timeIntervalSince(info.timestamp) * rate < info.duration + 1
+    }
+}
+
+/// Dedicated music and audio apps, preferred over browsers and video players (#5).
+enum MusicApps {
+    private static let known: Set<String> = [
+        "com.apple.Music", "com.apple.podcasts", "com.apple.iTunes",
+        "com.spotify.client", "com.anghami.anghami", "com.anghami.macos",
+        "com.deezer.deezer-desktop", "com.tidal.desktop", "com.amazon.music",
+        "com.soundcloud.desktop", "com.pandora.desktop", "com.audible.mac",
+        "com.overcast.mac", "fm.last.Scrobbler", "com.coppertino.Vox", "com.foobar2000.mac",
+        "sh.cider.cider", "sh.cider.genten.mac", "com.youtube.music",
+    ]
+    private static let prefixes = ["com.anghami.", "com.deezer.", "com.tidal.", "sh.cider."]
+
+    static func contains(_ bundleID: String) -> Bool {
+        known.contains(bundleID) || prefixes.contains { bundleID.hasPrefix($0) }
+    }
+
+    /// Apps whose playback Islet can control directly with AppleScript when they aren't the active source.
+    static func scriptable(_ bundleID: String) -> Bool {
+        bundleID == "com.apple.Music" || bundleID == "com.spotify.client"
+    }
+}
+
 /// MediaRemote command IDs understood by mediaremote-adapter's `send` command.
 enum MediaCommand: Int {
     case play = 0, pause = 1, togglePlayPause = 2, stop = 3, next = 4, previous = 5
@@ -94,6 +133,25 @@ final class NowPlayingService: ObservableObject {
     private var upscaleTask: Task<Void, Never>?
     private var lastBundleID: String?
     private var isStopping = false
+
+    // MARK: Sources (#5)
+
+    /// What macOS currently reports as Now Playing (it only ever reports one app).
+    private var active: SourceSnapshot?
+    /// Last report from a dedicated music app, kept so a browser tab can't steal the island from it.
+    private var lastMusic: SourceSnapshot?
+    /// The user paused or skipped the held music app from Islet, so keep holding it while paused.
+    private var holdPinned = false
+    private var pinTimer: Timer?
+
+    /// Apps seen this session, for the Ignore menu.
+    @Published private(set) var recentSources: [String] = []
+
+    /// True while Islet shows a music app that isn't macOS's active Now Playing source.
+    var isShowingPinnedSource: Bool {
+        guard let shown = info?.appBundleID else { return false }
+        return shown != active?.bundleID
+    }
 
     // MARK: Lifecycle
 
@@ -177,14 +235,24 @@ final class NowPlayingService: ObservableObject {
     }
 
     private func apply(_ payload: [String: Any]) {
-        guard let title = payload["title"] as? String, !title.isEmpty else {
-            upscaleTask?.cancel()
-            info = nil
-            artwork = nil
-            lastArtworkData = nil
-            palette = nil
-            return
+        active = Self.snapshot(from: payload)
+        if active == nil {
+            // macOS reports nothing at all, so no music app is playing either.
+            lastMusic = nil
+            holdPinned = false
         }
+        if let active {
+            noteSource(active.bundleID)
+            if active.isMusicApp {
+                lastMusic = active
+                holdPinned = false
+            }
+        }
+        refreshDisplayed()
+    }
+
+    private static func snapshot(from payload: [String: Any]) -> SourceSnapshot? {
+        guard let title = payload["title"] as? String, !title.isEmpty else { return nil }
 
         func number(_ key: String) -> Double { (payload[key] as? NSNumber)?.doubleValue ?? 0 }
 
@@ -206,12 +274,92 @@ final class NowPlayingService: ObservableObject {
             playbackRate: (payload["playbackRate"] as? NSNumber)?.doubleValue ?? (playing ? 1 : 0)
         )
 
-        let isNewTrack = info?.trackID != new.trackID
-        info = new
-        updateAppIcon(for: bundleID)
+        let artworkData = (payload["artworkData"] as? String)
+            .flatMap { Data(base64Encoded: $0, options: .ignoreUnknownCharacters) }
+        let isMusic = MusicApps.contains(bundleID) || (payload["isMusicApp"] as? Bool ?? false)
+        return SourceSnapshot(info: new, artworkData: artworkData, isMusicApp: isMusic)
+    }
 
-        if let b64 = payload["artworkData"] as? String,
-           let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters) {
+    // MARK: Choosing the source to show
+
+    /// Picks what the island shows: the active source unless it's ignored, or a browser/video took over
+    /// from a music app that should still be playing.
+    private func refreshDisplayed() {
+        let ignored = IsletSettings.ignoredApps
+        var shown: SourceSnapshot?
+        if let active, !ignored.contains(active.bundleID) { shown = active }
+
+        let activeIsMusic = shown?.isMusicApp ?? false
+        if !activeIsMusic, let music = lastMusic, music.bundleID != active?.bundleID,
+           !ignored.contains(music.bundleID), canHold(music),
+           shown == nil || IsletSettings.preferMusicApps {
+            shown = music
+        }
+
+        display(shown)
+        updatePinTimer()
+    }
+
+    /// A music app we no longer hear from is still worth showing if it's running and, as far as we
+    /// know, still playing (or the user is controlling it from Islet).
+    private func canHold(_ music: SourceSnapshot) -> Bool {
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: music.bundleID).isEmpty == false
+        else { return false }
+        if music.info.isPlaying { return music.trackStillRunning() }
+        return holdPinned
+    }
+
+    /// Re-checks a held source each second, so it's dropped when its track would have ended.
+    private func updatePinTimer() {
+        if isShowingPinnedSource {
+            guard pinTimer == nil else { return }
+            pinTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshDisplayed() }
+            }
+        } else {
+            pinTimer?.invalidate()
+            pinTimer = nil
+        }
+    }
+
+    private func noteSource(_ bundleID: String) {
+        guard !bundleID.isEmpty, bundleID != Bundle.main.bundleIdentifier else { return }
+        if let index = recentSources.firstIndex(of: bundleID) {
+            if index == 0 { return }
+            recentSources.remove(at: index)
+        }
+        recentSources.insert(bundleID, at: 0)
+        if recentSources.count > 12 { recentSources.removeLast() }
+    }
+
+    func setIgnored(_ bundleID: String, _ ignore: Bool) {
+        var set = IsletSettings.ignoredApps
+        if ignore { set.insert(bundleID) } else { set.remove(bundleID) }
+        IsletSettings.ignoredApps = set
+        refreshDisplayed()
+    }
+
+    var preferMusicApps: Bool {
+        get { IsletSettings.preferMusicApps }
+        set { IsletSettings.preferMusicApps = newValue; refreshDisplayed() }
+    }
+
+    private func display(_ snapshot: SourceSnapshot?) {
+        guard let snapshot else {
+            upscaleTask?.cancel()
+            info = nil
+            artwork = nil
+            lastArtworkData = nil
+            palette = nil
+            return
+        }
+
+        let new = snapshot.info
+        let isNewTrack = info?.trackID != new.trackID
+        if info != new { info = new }
+        updateAppIcon(for: new.appBundleID)
+
+        if let data = snapshot.artworkData {
             if data != lastArtworkData, let image = NSImage(data: data) {
                 lastArtworkData = data
                 artwork = image
@@ -276,15 +424,32 @@ final class NowPlayingService: ObservableObject {
     // MARK: Controls
 
     func send(_ command: MediaCommand) {
+        if isShowingPinnedSource, let id = info?.appBundleID {
+            // MediaRemote commands go to the active source (the browser), so talk to the music app itself.
+            switch command {
+            case .next: controlPinned(id, music: "next track", fallbackOpens: true)
+            case .previous: controlPinned(id, music: "previous track", fallbackOpens: true)
+            case .togglePlayPause: controlPinned(id, music: "playpause", fallbackOpens: true)
+            case .play: controlPinned(id, music: "play", fallbackOpens: true)
+            case .pause, .stop: controlPinned(id, music: "pause", fallbackOpens: true)
+            }
+            return
+        }
         runOneShot(["send", String(command.rawValue)])
     }
 
     func togglePlayPause() {
+        let pinned = isShowingPinnedSource
+        if pinned, let id = info?.appBundleID, !MusicApps.scriptable(id) {
+            openSourceApp() // can't control it from here; let the user do it in the app
+            return
+        }
         if var current = info { // optimistic update so the UI reacts instantly
             current.elapsed = current.currentElapsed()
             current.timestamp = Date()
             current.isPlaying.toggle()
             info = current
+            if pinned { lastMusic?.info = current }
         }
         send(.togglePlayPause)
     }
@@ -292,11 +457,37 @@ final class NowPlayingService: ObservableObject {
     func seek(toFraction fraction: Double) {
         guard var current = info, current.duration > 0 else { return }
         let seconds = max(0, min(1, fraction)) * current.duration
+        if isShowingPinnedSource {
+            guard MusicApps.scriptable(current.appBundleID) else { return }
+            current.elapsed = seconds
+            current.timestamp = Date()
+            info = current
+            lastMusic?.info = current
+            controlPinned(current.appBundleID, music: "set player position to \(seconds)", fallbackOpens: false)
+            return
+        }
         current.elapsed = seconds
         current.timestamp = Date()
         info = current
         runOneShot(["seek", String(max(1, Int(seconds * 1_000_000)))])
     }
+
+    /// Controls a held music app that isn't the active Now Playing source. Apple Music and Spotify are
+    /// scripted directly; other apps are brought to the front instead.
+    private func controlPinned(_ bundleID: String, music command: String, fallbackOpens: Bool) {
+        guard MusicApps.scriptable(bundleID) else {
+            if fallbackOpens { openSourceApp() }
+            return
+        }
+        holdPinned = true
+        let source = "tell application id \"\(bundleID)\" to \(command)"
+        Self.scriptQueue.async {
+            var error: NSDictionary?
+            NSAppleScript(source: source)?.executeAndReturnError(&error)
+        }
+    }
+
+    private static let scriptQueue = DispatchQueue(label: "Islet.AppleScript")
 
     func openSourceApp() {
         guard let id = info?.appBundleID,

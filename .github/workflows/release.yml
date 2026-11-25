@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the build to (e.g. v1.1.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Build adapter
+        run: |
+          command -v cmake >/dev/null || brew install cmake
+          ./Scripts/setup-adapter.sh
+      - name: Build Islet.app
+        run: ./Scripts/bundle.sh
+      - name: Package
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Islet.app "Islet-${TAG}.zip"
+          shasum -a 256 "Islet-${TAG}.zip" | tee "Islet-${TAG}.zip.sha256"
+      - name: Upload to release
+        run: gh release upload "$TAG" "build/Islet-${TAG}.zip" "build/Islet-${TAG}.zip.sha256" --clobber

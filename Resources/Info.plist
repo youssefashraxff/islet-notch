@@ -7,10 +7,11 @@
     <key>CFBundleIdentifier</key><string>com.youssef.NotchMusic</string>
     <key>CFBundleExecutable</key><string>NotchMusic</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>1.1.0</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>Islet controls Apple Music or Spotify directly when another app, such as a browser tab, is the active Now Playing source.</string>
 </dict>
 </plist>

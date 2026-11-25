@@ -31,7 +31,7 @@ brew install cmake
 mv build/Islet.app /Applications/ && open /Applications/Islet.app
 ```
 
-For development, `swift run` (or open `Package.swift` in Xcode).
+For development, `swift run` (or open `Package.swift` in Xcode). On macOS 27+ without full Xcode, prefix with `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk` (Command Line Tools 27+ omits the `SwiftUIMacros` plugin; `bundle.sh` applies this fallback automatically).
 
 Islet lives in the menu bar (♪): turn on **Launch at Login**, toggle **High-Resolution Posters**, or quit from there.
 

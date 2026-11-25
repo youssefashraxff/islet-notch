@@ -3,3 +3,4 @@ build/
 .adapter-src/
 Vendor/
 .swiftpm/
+.vscode/

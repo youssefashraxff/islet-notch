@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a release NotchMusic.app in ./build
+# Builds a release Islet.app in ./build
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -9,7 +9,7 @@ ADAPTER="Vendor/MediaRemoteAdapter"
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)/NotchMusic"
 
-APP="build/NotchMusic.app"
+APP="build/Islet.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN" "$APP/Contents/MacOS/NotchMusic"
@@ -22,4 +22,4 @@ codesign --force --sign - "$APP/Contents/Frameworks/MediaRemoteAdapter.framework
 codesign --force --sign - "$APP"
 
 echo "Built $APP"
-echo "Install: mv \"$APP\" /Applications/ && open /Applications/NotchMusic.app"
+echo "Install: mv \"$APP\" /Applications/ && open /Applications/Islet.app"

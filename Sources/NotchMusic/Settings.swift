@@ -1,5 +1,20 @@
 import AppKit
 
+/// How the island's background is drawn.
+enum PanelStyle: String, CaseIterable {
+    /// The artwork's colours as a gradient over a blurred backdrop.
+    case gradient
+    /// Apple's Liquid Glass on its own, no artwork colours.
+    case liquidGlass
+
+    var title: String {
+        switch self {
+        case .gradient: "Artwork Gradient"
+        case .liquidGlass: "Liquid Glass"
+        }
+    }
+}
+
 /// User preferences shown in the ♪ menu, stored in UserDefaults.
 enum IsletSettings {
     private static let defaults = UserDefaults.standard
@@ -41,6 +56,14 @@ enum IsletSettings {
     static var preferMusicApps: Bool {
         get { bool("preferMusicApps", default: true) }
         set { defaults.set(newValue, forKey: "preferMusicApps") }
+    }
+
+    /// Background style chosen in the Style submenu. Read live by the island through @AppStorage.
+    static let panelStyleKey = "panelStyle"
+
+    static var panelStyle: PanelStyle {
+        get { defaults.string(forKey: panelStyleKey).flatMap(PanelStyle.init(rawValue:)) ?? .gradient }
+        set { defaults.set(newValue.rawValue, forKey: panelStyleKey) }
     }
 
     /// Bundle IDs that never take over the island (#5).

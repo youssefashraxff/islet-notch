@@ -11,7 +11,7 @@ struct ArtworkPalette: Equatable {
     var tints: [Color] { colors.map(Self.color) }
 
     /// Darker versions for the bottom of the background, same hues.
-    var deepTints: [Color] { colors.map { Self.color($0 * (colorScheme == .dark ? 0.78 : 0.88)) } }
+    var deepTints: [Color] { colors.map { Self.color($0 * (colorScheme == .dark ? 0.6 : 0.86)) } }
 
     /// The most prominent colour.
     var tint: Color { tints[0] }
@@ -37,7 +37,7 @@ struct ArtworkPalette: Equatable {
     /// Glass mutes colour, so start a little more vivid.
     private static func vivid(_ c: SIMD3<Double>) -> SIMD3<Double> {
         let grey = SIMD3(repeating: c.sum() / 3)
-        return (grey + (c - grey) * 1.7).clamped(lowerBound: .zero, upperBound: SIMD3(repeating: 1))
+        return (grey + (c - grey) * 1.4).clamped(lowerBound: .zero, upperBound: SIMD3(repeating: 1))
     }
 
     private static func adjust(_ major: SIMD3<Double>, for scheme: ColorScheme) -> SIMD3<Double> {

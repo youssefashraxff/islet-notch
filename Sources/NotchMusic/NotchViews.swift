@@ -8,6 +8,7 @@ struct NotchRootView: View {
     @ObservedObject var nowPlaying: NowPlayingService
 
     @Environment(\.colorScheme) private var systemScheme
+    @AppStorage(IsletSettings.panelStyleKey) private var style: PanelStyle = .gradient
 
     var body: some View {
         let state = model.state
@@ -16,7 +17,7 @@ struct NotchRootView: View {
                                bottomRadius: model.bottomRadius(for: state))
 
         ZStack(alignment: .top) {
-            GlassBackground(shape: shape, isIdle: state == .idle, palette: nowPlaying.palette)
+            GlassBackground(shape: shape, isIdle: state == .idle, palette: nowPlaying.palette, style: style)
 
             content(for: state)
                 .padding(.horizontal, model.topRadius(for: state))
@@ -34,8 +35,9 @@ struct NotchRootView: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.8), value: state)
         .animation(.spring(response: 0.42, dampingFraction: 0.8), value: model.hasMedia)
         .animation(.easeInOut(duration: 0.5), value: nowPlaying.palette)
-        // Labels and glass follow the artwork's brightness rather than the system's light/dark mode.
-        .environment(\.colorScheme, nowPlaying.palette?.colorScheme ?? systemScheme)
+        .animation(.easeInOut(duration: 0.3), value: style)
+        // With the gradient, labels follow the artwork's brightness; plain glass follows light/dark mode.
+        .environment(\.colorScheme, style == .gradient ? nowPlaying.palette?.colorScheme ?? systemScheme : systemScheme)
     }
 
     @ViewBuilder
@@ -54,49 +56,54 @@ struct NotchRootView: View {
     }
 }
 
-// MARK: - Liquid Glass
+// MARK: - Background
 
-/// Liquid Glass on macOS 26+, a blurred material before that. The artwork's major colours sit *under* the
-/// glass, the way Apple's own players do, so the glass lenses them at the edges and lays its rim highlight
-/// on top. Idle is covered in black so it still disappears into the hardware notch.
+/// Two styles, picked in the ♪ menu:
+/// - Artwork Gradient: the artwork's major colours over a blurred backdrop, finished with a soft sheen.
+/// - Liquid Glass: Apple's glass on its own (a blurred material before macOS 26), no artwork colours.
+/// Idle is covered in black so it still disappears into the hardware notch.
 struct GlassBackground: View {
     let shape: NotchShape
     let isIdle: Bool
     let palette: ArtworkPalette?
+    let style: PanelStyle
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        glass
-            .overlay(gloss.opacity(isIdle ? 0 : 1))
-            .overlay(shape.fill(Color.black).opacity(isIdle ? 1 : 0))
+        Group {
+            switch style {
+            case .gradient:
+                material.overlay(wash).overlay(gloss.opacity(isIdle ? 0 : 1))
+            case .liquidGlass:
+                liquidGlass
+            }
+        }
+        .overlay(shape.fill(Color.black).opacity(isIdle ? 1 : 0))
+    }
+
+    private var material: some View {
+        shape
+            .fill(.ultraThinMaterial)
+            .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
     }
 
     @ViewBuilder
-    private var glass: some View {
+    private var liquidGlass: some View {
         if #available(macOS 26.0, *) {
-            ZStack {
-                wash
-                // Clear glass is only legible over the colour wash; without artwork, fall back to regular.
-                Color.clear.glassEffect(palette == nil ? .regular : .clear, in: shape)
-            }
+            Color.clear.glassEffect(.regular, in: shape)
         } else {
-            ZStack {
-                shape
-                    .fill(.ultraThinMaterial)
-                    .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
-                wash
-            }
+            material
         }
     }
 
-    /// The artwork's major colours mixed across the panel, deepening downwards; the desktop shows through
+    /// The artwork's major colours mixed across the panel, deepening downwards; the blur shows through
     /// just enough to stay translucent.
     @ViewBuilder
     private var wash: some View {
         if let palette {
-            let top = palette.tints.map { $0.opacity(reduceTransparency ? 1 : 0.8) }
-            let bottom = palette.deepTints.map { $0.opacity(reduceTransparency ? 1 : 0.9) }
+            let top = palette.tints.map { $0.opacity(reduceTransparency ? 1 : 0.84) }
+            let bottom = palette.deepTints.map { $0.opacity(reduceTransparency ? 1 : 0.92) }
             Group {
                 if #available(macOS 15.0, *) {
                     // Bottom row is rotated against the top so each colour bleeds diagonally into the others.
@@ -117,7 +124,7 @@ struct GlassBackground: View {
         }
     }
 
-    /// Light pooling along the lower lip. No drawn rim: the edge comes from the glass itself.
+    /// Light pooling along the lower lip.
     private var gloss: some View {
         shape.fill(LinearGradient(stops: [.init(color: .white.opacity(0.06), location: 0),
                                           .init(color: .clear, location: 0.35),

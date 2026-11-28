@@ -107,11 +107,29 @@ struct GlassBackground: View {
                 }
             }
             .clipShape(shape)
+            .mask(rimMask)
             .allowsHitTesting(false)
         }
     }
 
-    /// Light pooling along the lower lip. No drawn rim: the edge comes from the glass itself.
+    /// Width of the band along the sides and bottom where the wash fades out and the bare Liquid Glass shows,
+    /// so its rim highlight and edge lensing stay visible. The top runs along the screen edge, so it keeps the wash.
+    private static let rimBand: CGFloat = 9
+
+    /// Opaque inside, feathered to clear along the open (side and bottom) edges of the shape.
+    private var rimMask: some View {
+        let band = Self.rimBand
+        return shape.fill(Color.black)
+            .overlay(
+                shape.edges
+                    .stroke(Color.black, style: StrokeStyle(lineWidth: band * 2, lineCap: .round, lineJoin: .round))
+                    .blur(radius: band * 0.45)
+                    .opacity(reduceTransparency ? 0 : 1) // solid wash edge to edge when transparency is reduced
+                    .blendMode(.destinationOut))
+            .compositingGroup()
+    }
+
+    /// Light pooling along the lower lip. No drawn rim: the edge comes from the glass itself, left uncovered by the wash.
     private var gloss: some View {
         shape.fill(LinearGradient(stops: [.init(color: .white.opacity(0.06), location: 0),
                                           .init(color: .clear, location: 0.35),
@@ -138,6 +156,20 @@ struct NotchShape: Shape {
         set { topRadius = newValue.first; bottomRadius = newValue.second }
     }
 
+    /// The outline without the top edge along the screen, for stroking the visible rim only.
+    var edges: NotchShape {
+        var s = self
+        s.isOpen = true
+        return s
+    }
+
+    private var isOpen = false
+
+    init(topRadius: CGFloat, bottomRadius: CGFloat) {
+        self.topRadius = topRadius
+        self.bottomRadius = bottomRadius
+    }
+
     func path(in rect: CGRect) -> Path {
         let tr = min(topRadius, rect.width / 4)
         let br = max(0, min(bottomRadius, (rect.width - 2 * tr) / 2, rect.height - tr))
@@ -154,7 +186,7 @@ struct NotchShape: Shape {
         p.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.minY + tr))
         p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY),
                        control: CGPoint(x: rect.maxX - tr, y: rect.minY))
-        p.closeSubpath()
+        if !isOpen { p.closeSubpath() }
         return p
     }
 }

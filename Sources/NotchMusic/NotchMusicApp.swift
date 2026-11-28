@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(collapse)
 
         menu.addItem(.separator())
+        menu.addItem(submenu(title: "Style", menu: styleMenu))
         menu.addItem(submenu(title: "Display", menu: displayMenu))
         menu.addItem(submenu(title: "Media Sources", menu: sourcesMenu))
 
@@ -87,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
+    private let styleMenu = NSMenu(title: "Style")
     private let displayMenu = NSMenu(title: "Display")
     private let sourcesMenu = NSMenu(title: "Media Sources")
 
@@ -106,6 +108,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         IsletSettings.collapseWhenPaused.toggle()
         sender.state = IsletSettings.collapseWhenPaused ? .on : .off
         notchController?.collapseSettingChanged()
+    }
+
+    // MARK: Style submenu
+
+    private func rebuildStyleMenu() {
+        styleMenu.removeAllItems()
+        for style in PanelStyle.allCases {
+            let item = NSMenuItem(title: style.title, action: #selector(chooseStyle(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = style.rawValue
+            item.state = IsletSettings.panelStyle == style ? .on : .off
+            styleMenu.addItem(item)
+        }
+    }
+
+    @objc private func chooseStyle(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let style = PanelStyle(rawValue: raw) else { return }
+        IsletSettings.panelStyle = style
     }
 
     // MARK: Display submenu (#4)
@@ -214,7 +234,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
-        if menu === displayMenu { rebuildDisplayMenu() }
+        if menu === styleMenu { rebuildStyleMenu() }
+        else if menu === displayMenu { rebuildDisplayMenu() }
         else if menu === sourcesMenu { rebuildSourcesMenu() }
     }
 }

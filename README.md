@@ -41,6 +41,7 @@ Islet lives in the menu bar (♪):
 - **High-Resolution Posters**: full-size covers from Apple's catalog (see below)
 - **Haptic Feedback**: a light trackpad tap when the island expands on hover
 - **Collapse When Paused**: tucks the island back into the notch 5 s after playback pauses, like the iPhone. It comes back on play, on a track change, or when you hover the notch
+- **Style**: **Artwork Gradient** (the cover's colours over a blur) or **Liquid Glass** (Apple's clear glass, tinted with the cover)
 - **Display**: pick which display shows the island. **Automatic** uses the built-in notched display, otherwise the main one
 - **Media Sources**: **Prefer Music Apps** keeps a playing music app (Apple Music, Spotify, Anghami, Deezer, TIDAL, Podcasts…) on the island when a browser tab or video also starts playing. Under **Ignore**, tick apps that should never take over the island
 

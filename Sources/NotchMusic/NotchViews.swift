@@ -56,8 +56,8 @@ struct NotchRootView: View {
 
 // MARK: - Liquid Glass
 
-/// Liquid Glass on macOS 26+, a blurred material before that, washed with the artwork's major colour and
-/// finished with a glossy sheen and rim. Idle is covered in black so it still disappears into the hardware notch.
+/// Liquid Glass on macOS 26+, a blurred material before that, washed with a blend of the artwork's major
+/// colours and finished with a soft sheen. Idle is covered in black so it still disappears into the hardware notch.
 struct GlassBackground: View {
     let shape: NotchShape
     let isIdle: Bool
@@ -84,35 +84,41 @@ struct GlassBackground: View {
         }
     }
 
-    /// The artwork's colour, deepening downwards; the glass shows through just enough to stay translucent.
+    /// The artwork's major colours mixed across the panel, deepening downwards; the glass shows through
+    /// just enough to stay translucent.
+    @ViewBuilder
     private var wash: some View {
-        func stop(_ color: Color?, _ opacity: Double, _ location: Double) -> Gradient.Stop {
-            .init(color: (color ?? .clear).opacity(reduceTransparency ? 1 : opacity), location: location)
-        }
-        return shape
-            .fill(LinearGradient(stops: [stop(palette?.tint, 0.82, 0),
-                                         stop(palette?.tint, 0.88, 0.45),
-                                         stop(palette?.deepTint, 0.92, 1)],
-                                 startPoint: .top, endPoint: .bottom))
+        if let palette {
+            let top = palette.tints.map { $0.opacity(reduceTransparency ? 1 : 0.84) }
+            let bottom = palette.deepTints.map { $0.opacity(reduceTransparency ? 1 : 0.92) }
+            Group {
+                if #available(macOS 15.0, *) {
+                    // Bottom row is rotated against the top so each colour bleeds diagonally into the others.
+                    MeshGradient(width: 3, height: 2,
+                                 points: [[0, 0], [0.5, 0], [1, 0],
+                                          [0, 1], [0.5, 1], [1, 1]],
+                                 colors: [top[0], top[1], top[2],
+                                          bottom[2], bottom[0], bottom[1]],
+                                 smoothsColors: true)
+                } else {
+                    LinearGradient(colors: top, startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .overlay(LinearGradient(colors: [.clear, bottom[0]], startPoint: .top, endPoint: .bottom)
+                            .opacity(0.6))
+                }
+            }
+            .clipShape(shape)
             .allowsHitTesting(false)
+        }
     }
 
+    /// Light pooling along the lower lip. No drawn rim: the edge comes from the glass itself.
     private var gloss: some View {
-        ZStack {
-            // Light pooling along the lower lip.
-            shape.fill(LinearGradient(stops: [.init(color: .white.opacity(0.06), location: 0),
-                                              .init(color: .clear, location: 0.35),
-                                              .init(color: .clear, location: 0.8),
-                                              .init(color: .white.opacity(0.03), location: 1)],
-                                      startPoint: .top, endPoint: .bottom))
-            // Specular rim; fades out at the top, where the island meets the screen edge.
-            shape.stroke(LinearGradient(stops: [.init(color: .clear, location: 0),
-                                                .init(color: .white.opacity(0.22), location: 0.25),
-                                                .init(color: .white.opacity(0.65), location: 1)],
-                                        startPoint: .top, endPoint: .bottom), lineWidth: 2)
-                .clipShape(shape) // inner half only: a crisp 1 pt line
-        }
-        .allowsHitTesting(false)
+        shape.fill(LinearGradient(stops: [.init(color: .white.opacity(0.06), location: 0),
+                                          .init(color: .clear, location: 0.35),
+                                          .init(color: .clear, location: 0.8),
+                                          .init(color: .white.opacity(0.03), location: 1)],
+                                  startPoint: .top, endPoint: .bottom))
+            .allowsHitTesting(false)
     }
 }
 

@@ -36,8 +36,8 @@ struct NotchRootView: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.8), value: model.hasMedia)
         .animation(.easeInOut(duration: 0.5), value: nowPlaying.palette)
         .animation(.easeInOut(duration: 0.3), value: style)
-        // With the gradient, labels follow the artwork's brightness; plain glass follows light/dark mode.
-        .environment(\.colorScheme, style == .gradient ? nowPlaying.palette?.colorScheme ?? systemScheme : systemScheme)
+        // Labels and glass follow the artwork's brightness rather than the system's light/dark mode.
+        .environment(\.colorScheme, nowPlaying.palette?.colorScheme ?? systemScheme)
     }
 
     @ViewBuilder
@@ -60,7 +60,7 @@ struct NotchRootView: View {
 
 /// Two styles, picked in the ♪ menu:
 /// - Artwork Gradient: the artwork's major colours over a blurred backdrop, finished with a soft sheen.
-/// - Liquid Glass: Apple's glass on its own (a blurred material before macOS 26), no artwork colours.
+/// - Liquid Glass: Apple's clear glass tinted with the cover's main colour (a blurred material before macOS 26).
 /// Idle is covered in black so it still disappears into the hardware notch.
 struct GlassBackground: View {
     let shape: NotchShape
@@ -91,7 +91,11 @@ struct GlassBackground: View {
     @ViewBuilder
     private var liquidGlass: some View {
         if #available(macOS 26.0, *) {
-            Color.clear.glassEffect(.regular, in: shape)
+            // Clear glass keeps the desktop sharp in the middle and lenses it at the rim. Glass's own tint
+            // (not a layer on top) colours it with the cover and dims it enough for the labels.
+            let glass: Glass = palette.map { .clear.tint($0.tint.opacity(reduceTransparency ? 0.9 : 0.55)) }
+                ?? .regular
+            Color.clear.glassEffect(glass, in: shape)
         } else {
             material
         }

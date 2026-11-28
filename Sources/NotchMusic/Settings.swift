@@ -4,7 +4,7 @@ import AppKit
 enum PanelStyle: String, CaseIterable {
     /// The artwork's colours as a gradient over a blurred backdrop.
     case gradient
-    /// Apple's Liquid Glass on its own, no artwork colours.
+    /// Apple's clear Liquid Glass, tinted with the artwork's main colour.
     case liquidGlass
 
     var title: String {

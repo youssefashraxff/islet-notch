@@ -56,8 +56,9 @@ struct NotchRootView: View {
 
 // MARK: - Liquid Glass
 
-/// Liquid Glass on macOS 26+, a blurred material before that, washed with a blend of the artwork's major
-/// colours and finished with a soft sheen. Idle is covered in black so it still disappears into the hardware notch.
+/// Liquid Glass on macOS 26+, a blurred material before that. The artwork's major colours sit *under* the
+/// glass, the way Apple's own players do, so the glass lenses them at the edges and lays its rim highlight
+/// on top. Idle is covered in black so it still disappears into the hardware notch.
 struct GlassBackground: View {
     let shape: NotchShape
     let isIdle: Bool
@@ -67,7 +68,6 @@ struct GlassBackground: View {
 
     var body: some View {
         glass
-            .overlay(wash)
             .overlay(gloss.opacity(isIdle ? 0 : 1))
             .overlay(shape.fill(Color.black).opacity(isIdle ? 1 : 0))
     }
@@ -75,22 +75,28 @@ struct GlassBackground: View {
     @ViewBuilder
     private var glass: some View {
         if #available(macOS 26.0, *) {
-            // Clear glass is only legible under the colour wash; without artwork, fall back to regular.
-            Color.clear.glassEffect(palette == nil ? .regular : .clear, in: shape)
+            ZStack {
+                wash
+                // Clear glass is only legible over the colour wash; without artwork, fall back to regular.
+                Color.clear.glassEffect(palette == nil ? .regular : .clear, in: shape)
+            }
         } else {
-            shape
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
+            ZStack {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
+                wash
+            }
         }
     }
 
-    /// The artwork's major colours mixed across the panel, deepening downwards; the glass shows through
+    /// The artwork's major colours mixed across the panel, deepening downwards; the desktop shows through
     /// just enough to stay translucent.
     @ViewBuilder
     private var wash: some View {
         if let palette {
-            let top = palette.tints.map { $0.opacity(reduceTransparency ? 1 : 0.84) }
-            let bottom = palette.deepTints.map { $0.opacity(reduceTransparency ? 1 : 0.92) }
+            let top = palette.tints.map { $0.opacity(reduceTransparency ? 1 : 0.8) }
+            let bottom = palette.deepTints.map { $0.opacity(reduceTransparency ? 1 : 0.9) }
             Group {
                 if #available(macOS 15.0, *) {
                     // Bottom row is rotated against the top so each colour bleeds diagonally into the others.
@@ -107,29 +113,11 @@ struct GlassBackground: View {
                 }
             }
             .clipShape(shape)
-            .mask(rimMask)
             .allowsHitTesting(false)
         }
     }
 
-    /// Width of the band along the sides and bottom where the wash fades out and the bare Liquid Glass shows,
-    /// so its rim highlight and edge lensing stay visible. The top runs along the screen edge, so it keeps the wash.
-    private static let rimBand: CGFloat = 9
-
-    /// Opaque inside, feathered to clear along the open (side and bottom) edges of the shape.
-    private var rimMask: some View {
-        let band = Self.rimBand
-        return shape.fill(Color.black)
-            .overlay(
-                shape.edges
-                    .stroke(Color.black, style: StrokeStyle(lineWidth: band * 2, lineCap: .round, lineJoin: .round))
-                    .blur(radius: band * 0.45)
-                    .opacity(reduceTransparency ? 0 : 1) // solid wash edge to edge when transparency is reduced
-                    .blendMode(.destinationOut))
-            .compositingGroup()
-    }
-
-    /// Light pooling along the lower lip. No drawn rim: the edge comes from the glass itself, left uncovered by the wash.
+    /// Light pooling along the lower lip. No drawn rim: the edge comes from the glass itself.
     private var gloss: some View {
         shape.fill(LinearGradient(stops: [.init(color: .white.opacity(0.06), location: 0),
                                           .init(color: .clear, location: 0.35),
@@ -156,20 +144,6 @@ struct NotchShape: Shape {
         set { topRadius = newValue.first; bottomRadius = newValue.second }
     }
 
-    /// The outline without the top edge along the screen, for stroking the visible rim only.
-    var edges: NotchShape {
-        var s = self
-        s.isOpen = true
-        return s
-    }
-
-    private var isOpen = false
-
-    init(topRadius: CGFloat, bottomRadius: CGFloat) {
-        self.topRadius = topRadius
-        self.bottomRadius = bottomRadius
-    }
-
     func path(in rect: CGRect) -> Path {
         let tr = min(topRadius, rect.width / 4)
         let br = max(0, min(bottomRadius, (rect.width - 2 * tr) / 2, rect.height - tr))
@@ -186,7 +160,7 @@ struct NotchShape: Shape {
         p.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.minY + tr))
         p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY),
                        control: CGPoint(x: rect.maxX - tr, y: rect.minY))
-        if !isOpen { p.closeSubpath() }
+        p.closeSubpath()
         return p
     }
 }
